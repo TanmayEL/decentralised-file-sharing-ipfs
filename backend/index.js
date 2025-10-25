@@ -9,12 +9,14 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
+const sharp = require('sharp');
+const zlib = require('zlib');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// security stuff
+// security
 app.use(helmet());
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -22,16 +24,12 @@ app.use(cors({
 }));
 
 // rate limiting to prevent spam
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 mins
-  max: 100 // max 100 requests per ip
-});
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
 app.use('/api/', limiter);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// connect to mongodb (hopefully it works)
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ipfs-files', {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -39,14 +37,14 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ipfs-file
 
 const dbConnection = mongoose.connection;
 dbConnection.on('error', console.error.bind(console, 'MongoDB connection error:'));
-dbConnection.once('open', () => {
-  console.log('Connected to MongoDB');
-});
+dbConnection.once('open', () => { console.log('Connected to MongoDB'); });
 
-// file schema for storing file info (i think this is right)
+// file schema for storing file info
 const fileSchema = new mongoose.Schema({
   name: { type: String, required: true },
   size: { type: Number, required: true },
+  originalSize: { type: Number },
+  compressed: { type: Boolean, default: false },
   type: { type: String, required: true },
   ipfsHash: { type: String, required: true, unique: true },
   uploadDate: { type: Date, default: Date.now },
@@ -56,7 +54,7 @@ const fileSchema = new mongoose.Schema({
   description: { type: String, default: '' }
 });
 
-// user schema (for login stuff)
+// user schema (for login)
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true, trim: true },
   email: { type: String, required: true, unique: true, trim: true, lowercase: true },
@@ -65,7 +63,7 @@ const userSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// hash password before saving (security stuff)
+// hash password before saving (security)
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   try {
@@ -77,10 +75,8 @@ userSchema.pre('save', async function(next) {
   }
 });
 
-// compare password method (for login)
-userSchema.methods.comparePassword = async function(candidatePassword) {
-  return bcrypt.compare(candidatePassword, this.password);
-};
+// compare password method (login)
+userSchema.methods.comparePassword = async function(candidatePassword) { return bcrypt.compare(candidatePassword, this.password); };
 
 const File = mongoose.model('File', fileSchema);
 const User = mongoose.model('User', userSchema);
@@ -89,15 +85,9 @@ const User = mongoose.model('User', userSchema);
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-
+  if (!token) { return res.status(401).json({ error: 'Access token required' }); }
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid or expired token' });
-    }
+    if (err) { return res.status(403).json({ error: 'Invalid or expired token' }); }
     req.user = user;
     next();
   });
@@ -107,20 +97,122 @@ const authenticateToken = (req, res, next) => {
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = 'uploads/';
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
+    if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir, { recursive: true }); }
     cb(null, uploadDir);
   },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + file.originalname);
-  }
+  filename: (req, file, cb) => { cb(null, Date.now() + '-' + file.originalname); }
 });
 
-const upload = multer({ 
-  storage: storage,
-  limits: { fileSize: 100 * 1024 * 1024 } // 100MB limit (hopefully enough)
-});
+const upload = multer({ storage: storage, limits: { fileSize: 10 * 1024 * 1024 } });
+
+// file compression utilities
+const compressFile = async (filePath, originalName) => {
+  try {
+    const stats = fs.statSync(filePath);
+    const fileSize = stats.size;
+    
+    // if file is already small, don't compress
+    if (fileSize < 1024 * 1024) { // less than 1MB
+      return { filePath, compressed: false, originalSize: fileSize };
+    }
+
+    const ext = path.extname(originalName).toLowerCase();
+    const compressedPath = filePath + '.compressed';
+
+    // compress images using sharp
+    if (['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
+      await sharp(filePath)
+        .jpeg({ quality: 80, progressive: true })
+        .png({ compressionLevel: 8 })
+        .webp({ quality: 80 })
+        .toFile(compressedPath);
+      
+      const compressedStats = fs.statSync(compressedPath);
+      const compressionRatio = (1 - compressedStats.size / fileSize) * 100;
+      
+      console.log(`Image compressed: ${(fileSize / 1024 / 1024).toFixed(2)}MB -> ${(compressedStats.size / 1024 / 1024).toFixed(2)}MB (${compressionRatio.toFixed(1)}% reduction)`);
+      
+      // use compressed version if its significantly smaller
+      if (compressedStats.size < fileSize * 0.9) {
+        fs.unlinkSync(filePath); // delete original
+        return { filePath: compressedPath, compressed: true, originalSize: fileSize, compressedSize: compressedStats.size };
+      } else {
+        fs.unlinkSync(compressedPath); // delete compressed if not better
+        return { filePath, compressed: false, originalSize: fileSize };
+      }
+    }
+    
+    // for other files, use gzip compression
+    const gzip = zlib.createGzip();
+    const input = fs.createReadStream(filePath);
+    const output = fs.createWriteStream(compressedPath);
+    
+    await new Promise((resolve, reject) => {
+      input.pipe(gzip).pipe(output);
+      output.on('finish', resolve);
+      output.on('error', reject);
+    });
+    
+    const compressedStats = fs.statSync(compressedPath);
+    const compressionRatio = (1 - compressedStats.size / fileSize) * 100;
+    
+    console.log(`File compressed: ${(fileSize / 1024 / 1024).toFixed(2)}MB -> ${(compressedStats.size / 1024 / 1024).toFixed(2)}MB (${compressionRatio.toFixed(1)}% reduction)`);
+    
+    // use compressed version if its significantly smaller
+    if (compressedStats.size < fileSize * 0.8) {
+      fs.unlinkSync(filePath); // delete original
+      return { filePath: compressedPath, compressed: true, originalSize: fileSize, compressedSize: compressedStats.size };
+    } else {
+      fs.unlinkSync(compressedPath); // delete compressed if not better
+      return { filePath, compressed: false, originalSize: fileSize };
+    }
+  } catch (error) {
+    console.error('Compression error:', error);
+    return { filePath, compressed: false, originalSize: fs.statSync(filePath).size };
+  }
+};
+
+// cleanup old files (7 days and older)
+const cleanupOldFiles = async () => {
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    
+    // find files older than 7 days
+    const oldFiles = await File.find({
+      uploadDate: { $lt: sevenDaysAgo }
+    });
+    
+    console.log(`Found ${oldFiles.length} files older than 7 days`);
+    
+    for (const file of oldFiles) {
+      try {
+        // unpin from Pinata
+        if (file.ipfsHash) {
+          await axios.delete(`https://api.pinata.cloud/pinning/unpin/${file.ipfsHash}`, {
+            headers: {
+              'pinata_api_key': pinataConfig.apiKey,
+              'pinata_secret_api_key': pinataConfig.secretKey
+            }
+          });
+          console.log(`Unpinned file: ${file.name} (${file.ipfsHash})`);
+        }
+        
+        // delete from database
+        await File.findByIdAndDelete(file._id);
+        console.log(`Deleted file record: ${file.name}`);
+      } catch (error) {
+        console.error(`Error cleaning up file ${file.name}:`, error.message);
+      }
+    }
+    
+    console.log(`Cleanup completed. Removed ${oldFiles.length} old files.`);
+  } catch (error) {
+    console.error('Cleanup error:', error);
+  }
+};
+
+// run cleanup every 24 hours
+setInterval(cleanupOldFiles, 24 * 60 * 60 * 1000);
 
 // ipfs setup for pinata (this took me forever to figure out)
 const axios = require('axios');
@@ -206,15 +298,9 @@ app.post('/api/login', [
 
     // Find user by email
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Check password
+    if (!user) { return res.status(401).json({ error: 'Invalid credentials' }); }
     const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    if (!isMatch) { return res.status(401).json({ error: 'Invalid credentials' }); }
 
     // Generate JWT token
     const token = jwt.sign(
@@ -242,9 +328,7 @@ app.post('/api/login', [
 app.get('/api/profile', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.userId).select('-password');
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    if (!user) { return res.status(404).json({ error: 'User not found' }); }
     res.json({ user });
   } catch (error) {
     console.error('Profile error:', error);
@@ -259,18 +343,32 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
+    // check file size limit (10MB)
+    if (req.file.size > 10 * 1024 * 1024) {
+      fs.unlinkSync(req.file.path); // delete uploaded file
+      return res.status(400).json({ error: 'File size exceeds 10MB limit' });
+    }
+
     if (!pinataConfig.apiKey || !pinataConfig.secretKey) {
       return res.status(500).json({ error: 'Pinata configuration not available' });
     }
 
     const { isPublic, description } = req.body;
-    const filePath = req.file.path;
+    let filePath = req.file.path;
+    let finalSize = req.file.size;
+
+    // compress file before upload
+    console.log(`Compressing file: ${req.file.originalname} (${(req.file.size / 1024 / 1024).toFixed(2)}MB)`);
+    const compressionResult = await compressFile(filePath, req.file.originalname);
+    filePath = compressionResult.filePath;
+    finalSize = compressionResult.compressedSize || compressionResult.originalSize;
 
     // Upload file to Pinata IPFS
     const formData = new FormData();
     formData.append('file', fs.createReadStream(filePath));
     formData.append('pinataMetadata', JSON.stringify({
-      name: req.file.originalname
+      name: req.file.originalname,
+      compressed: compressionResult.compressed
     }));
     formData.append('pinataOptions', JSON.stringify({
       cidVersion: 0
@@ -289,7 +387,9 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
     // Save file metadata to database
     const file = new File({
       name: req.file.originalname,
-      size: req.file.size,
+      size: finalSize,
+      originalSize: compressionResult.originalSize,
+      compressed: compressionResult.compressed,
       type: req.file.mimetype,
       ipfsHash: ipfsHash,
       uploader: req.user.userId,
@@ -492,10 +592,6 @@ app.use((error, req, res, next) => {
 });
 
 // 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Route not found' });
-});
+app.use('*', (req, res) => { res.status(404).json({ error: 'Route not found' }); });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => { console.log(`Server running on port ${PORT}`); });
