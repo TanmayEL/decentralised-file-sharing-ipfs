@@ -1,108 +1,99 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Button,
-  Box,
-  Container,
-  Paper,
-  Grid,
-  Card,
-  CardContent,
-  CardActions,
-} from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { AppBar, Toolbar, Typography, Button, Box, Container } from '@mui/material';
+import { useAuth } from './context/Web3Context';
+import Dashboard from './components/Dashboard';
+import FileUpload from './components/FileUpload';
+import PublicFiles from './components/PublicFiles';
+import Login from './components/Login';
+import Register from './components/Register';
+import { toast } from 'react-toastify';
 
-// Basic HomePage component for first increment
-const HomePage = () => {
+function HomePage() {
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Paper sx={{ p: 4, textAlign: 'center' }}>
-        <Typography variant="h3" component="h1" gutterBottom>
-          Decentralized File Sharing Platform
-        </Typography>
-        <Typography variant="h6" color="text.secondary" paragraph>
-          Built with IPFS Integration
-        </Typography>
-        <Typography variant="body1" paragraph>
-          This is the first increment of our decentralized file sharing platform.
-          The backend API is set up with MongoDB and basic authentication.
-        </Typography>
-        
-        <Grid container spacing={3} sx={{ mt: 2 }}>
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" component="h2">
-                  Backend API
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Express.js server with MongoDB integration
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" component="h2">
-                  Authentication
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  JWT-based user authentication system
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" component="h2">
-                  Database
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  MongoDB for user and file metadata
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
-      </Paper>
+    <Container maxWidth="md" sx={{ mt: 8, textAlign: 'center' }}>
+      <Typography variant="h2" component="h1" gutterBottom>
+        🌐 IPFS File Sharing Platform
+      </Typography>
+      <Typography variant="h5" color="text.secondary" paragraph>
+        Decentralized file storage and sharing powered by IPFS
+      </Typography>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
+        Upload, share, and collaborate on files stored on the InterPlanetary File System.
+        Experience true decentralization with censorship-resistant file storage.
+      </Typography>
+      <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+        <Button variant="contained" size="large" onClick={() => window.location.href = '/login'}>
+          Get Started
+        </Button>
+        <Button variant="outlined" size="large" onClick={() => window.location.href = '/public'}>
+          Browse Public Files
+        </Button>
+      </Box>
     </Container>
   );
-};
+}
 
 function App() {
+  const { user, isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+    toast.success('Logged out successfully!');
+  };
 
   return (
     <Box sx={{ flexGrow: 1 }}>
       <AppBar position="static">
         <Toolbar>
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Decentralized File Sharing
+            IPFS File Sharing
           </Typography>
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <Button color="inherit" onClick={() => navigate('/')}>
-              Home
-            </Button>
-            <Button color="inherit" onClick={() => navigate('/login')}>
-              Login
-            </Button>
-            <Button color="inherit" onClick={() => navigate('/register')}>
-              Register
-            </Button>
-          </Box>
+          {isAuthenticated ? (
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Typography variant="body1" sx={{ alignSelf: 'center' }}>
+                Welcome, {user?.username}!
+              </Typography>
+              <Button color="inherit" onClick={() => navigate('/')}>
+                Dashboard
+              </Button>
+              <Button color="inherit" onClick={() => navigate('/upload')}>
+                Upload
+              </Button>
+              <Button color="inherit" onClick={() => navigate('/public')}>
+                Public Files
+              </Button>
+              <Button color="inherit" onClick={handleLogout}>
+                Logout
+              </Button>
+            </Box>
+          ) : (
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Button color="inherit" onClick={() => navigate('/')}>
+                Home
+              </Button>
+              <Button color="inherit" onClick={() => navigate('/public')}>
+                Public Files
+              </Button>
+              <Button color="inherit" onClick={() => navigate('/login')}>
+                Login
+              </Button>
+              <Button color="inherit" onClick={() => navigate('/register')}>
+                Register
+              </Button>
+            </Box>
+          )}
         </Toolbar>
       </AppBar>
 
       <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/login" element={<div>Login Page - Coming in next increment</div>} />
-        <Route path="/register" element={<div>Register Page - Coming in next increment</div>} />
-        <Route path="*" element={<Navigate to="/" />} />
+        <Route path="/" element={user ? <Dashboard /> : <HomePage />} />
+        <Route path="/upload" element={user ? <FileUpload /> : <Navigate to="/login" />} />
+        <Route path="/public" element={<PublicFiles />} />
+        <Route path="/login" element={user ? <Navigate to="/" /> : <Login />} />
+        <Route path="/register" element={user ? <Navigate to="/" /> : <Register />} />
       </Routes>
     </Box>
   );
