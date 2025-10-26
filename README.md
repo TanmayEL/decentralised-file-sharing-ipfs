@@ -1,6 +1,6 @@
 # 🌐 IPFS File Sharing Platform
 
-A decentralized file sharing application that stores files on the InterPlanetary File System (IPFS) using Pinata as the IPFS pinning service. Users can upload, share, and collaborate on files pubbblicly with a modern React frontend and Node.js backend. Features automatic file compression, upload limits, and cleanup for optimal free tier usage.
+A decentralized file sharing application that stores files on the InterPlanetary File System (IPFS) using Pinata as the IPFS pinning service. Users can upload, share, and collaborate on files publicly with a modern React frontend and Node.js backend. Features automatic file compression, upload limits, and cleanup for optimal free tier usage.
 
 ## Live Application
 
