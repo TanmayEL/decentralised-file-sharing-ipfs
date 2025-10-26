@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 // Create axios instance
 const api = axios.create({
@@ -45,22 +45,22 @@ api.interceptors.response.use(
 // Authentication API
 export const authAPI = {
   register: (username, email, password) => {
-    return api.post('/register', { username, email, password });
+    return api.post('/api/register', { username, email, password });
   },
   
   login: (email, password) => {
-    return api.post('/login', { email, password });
+    return api.post('/api/login', { email, password });
   },
   
   getProfile: () => {
-    return api.get('/profile');
+    return api.get('/api/profile');
   }
 };
 
 // File API
 export const fileAPI = {
   uploadFile: (formData) => {
-    return api.post('/upload', formData, {
+    return api.post('/api/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -68,29 +68,29 @@ export const fileAPI = {
   },
 
   downloadFile: (hash) => {
-    return api.get(`/file/${hash}`, {
+    return api.get(`/api/file/${hash}`, {
       responseType: 'blob',
     });
   },
 
   getFileMetadata: (hash) => {
-    return api.get(`/metadata/${hash}`);
+    return api.get(`/api/metadata/${hash}`);
   },
 
   getUserFiles: () => {
-    return api.get('/files');
+    return api.get('/api/files');
   },
 
   getPublicFiles: () => {
-    return api.get('/public-files');
+    return api.get('/api/public-files');
   },
 
   shareFile: (hash, userIds) => {
-    return api.post(`/share/${hash}`, { userIds });
+    return api.post(`/api/share/${hash}`, { userIds });
   },
 
   deleteFile: (hash) => {
-    return api.delete(`/file/${hash}`);
+    return api.delete(`/api/file/${hash}`);
   }
 };
 

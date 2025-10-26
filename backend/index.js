@@ -17,10 +17,21 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // security
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
+}));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: [
+    process.env.FRONTEND_URL || 'http://localhost:3000',
+    'https://ipfs-file-sharing.netlify.app',
+    'https://ipfs-file-sharing.netlify.app/',
+    'http://ipfs-file-sharing.netlify.app',
+    'http://ipfs-file-sharing.netlify.app/'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // rate limiting to prevent spam
@@ -226,6 +237,11 @@ let pinataConfig = {
 console.log('Pinata IPFS client configured');
 
 // routes (all the api endpoints)
+
+// Root route for debugging
+app.get('/', (req, res) => {
+  res.json({ message: 'IPFS File Sharing Backend API' });
+});
 
 // health check (to see if server is running)
 app.get('/api/health', (req, res) => {
@@ -588,10 +604,17 @@ app.delete('/api/file/:hash', authenticateToken, async (req, res) => {
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error('Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error' });
+  res.status(500).json({ error: 'Internal server error', details: error.message });
 });
 
 // 404 handler
-app.use('*', (req, res) => { res.status(404).json({ error: 'Route not found' }); });
+app.use('*', (req, res) => {
+  console.log('404 - Route not found:', req.originalUrl);
+  res.status(404).json({ 
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method
+  });
+});
 
 app.listen(PORT, () => { console.log(`Server running on port ${PORT}`); });
